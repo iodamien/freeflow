@@ -56,6 +56,10 @@ def _add_dll_dir(d):
 
 
 def _setup_cuda_dlls():
+    if sys.platform != "win32":
+        # Linux resolves CUDA shared libraries via the system loader or
+        # LD_LIBRARY_PATH, which must be set before launching Python.
+        return
     found = []
     if getattr(sys, "frozen", False):
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
