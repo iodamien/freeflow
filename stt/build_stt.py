@@ -41,7 +41,9 @@ def find_in_site(rel_glob):
 
 
 def main():
-    no_cuda = "--no-cuda" in sys.argv
+    # Linux builds use CPU by default; system CUDA libraries can enable GPU at runtime.
+    # The Windows redistributable DLLs must never be copied into Linux builds.
+    no_cuda = "--no-cuda" in sys.argv or sys.platform != "win32"
     t0 = time.time()
     cmd = [
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir",
