@@ -104,9 +104,13 @@
     const pttInput = document.querySelector('input[name=mode][value=ptt]');
     pttInput.disabled = !state.pttAvailable;
     $('#mode-ptt-label').classList.toggle('disabled', !state.pttAvailable);
-    $('#ptt-hint').textContent = state.pttAvailable ? 'Garde la touche enfoncée pendant que tu parles ; un appui bref passe en mains libres.' : 'Indisponible : le module uiohook-napi n’a pas pu être chargé.';
+    $('#ptt-hint').textContent = state.pttAvailable ? 'Garde la touche enfoncée pendant que tu parles ; un appui bref passe en mains libres.' : (state.platform && state.platform.wayland ? 'Indisponible sous Wayland. Utilise le mode mains libres.' : 'Indisponible : le module uiohook-napi n’a pas pu être chargé.');
     $('#set-language').value = s.language;
     $('#set-autopaste').checked = !!s.autoPaste;
+    $('#set-autopaste').disabled = !!state.platform && !state.platform.autoPasteAvailable;
+    $('#platform-hint').textContent = state.platform && state.platform.wayland
+      ? 'Wayland : colle le texte avec Ctrl + V. Le mode maintenu et le collage automatique demandent une session X11. Le raccourci mains libres dépend du portail de ton bureau.'
+      : state.platform && state.platform.name === 'linux' ? 'Linux X11 : installe xdotool pour le collage automatique. Dans un terminal, utilise Ctrl + Maj + V pour coller manuellement.' : '';
     $('#set-login').checked = !!s.launchAtLogin;
     $('#eng-state').textContent = eng.ready ? 'Prêt' : eng.loading ? (eng.phase === 'downloading' ? state.loadingLabel : 'Chargement…') : 'Erreur';
     $('#eng-device').textContent = eng.device ? (eng.device === 'cuda' ? 'GPU (CUDA)' : 'CPU') : '—';
