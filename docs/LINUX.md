@@ -1,6 +1,6 @@
 # FreeFlow sur Linux — portage expérimental
 
-Ce fork ajoute une première cible Linux x86_64. La cible principale est une session **X11** sur Ubuntu 22.04 ou ultérieur. Le moteur utilise le CPU par défaut dans les paquets Linux. Un essai sur un vrai poste reste nécessaire pour le micro, les raccourcis du bureau et le collage dans chaque application.
+Ce fork ajoute une première cible Linux x86_64. La cible principale est une session **X11** sur Ubuntu 22.04 ou ultérieur. Les paquets Linux incluent le moteur autonome ; l’accélération GPU dépend des bibliothèques installées sur le système. Un essai sur un vrai poste reste nécessaire pour le micro, les raccourcis du bureau et le collage dans chaque application.
 
 ## Fonctions
 
