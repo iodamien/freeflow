@@ -1,0 +1,62 @@
+name: Publish Linux AppImage
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN: '40104606107'
+      SOURCE_SHA: ed60997dd27013cffe119836fb13ac8852474b96
+      RELEASE_TAG: v1.0.0-linux.1
+    steps:
+      - name: Verify the tested source build
+        run: |
+          conclusion=$(gh run view "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --json conclusion --jq .conclusion)
+          source=$(gh run view "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)
+          test "$conclusion" = success
+          test "$source" = "$SOURCE_SHA"
+      - name: Download the verified Linux package
+        uses: actions/download-artifact@v4
+        with:
+          name: freeflow-linux-x64
+          run-id: 40104606107
+          github-token: ${{ github.token }}
+          path: release-assets
+      - name: Prepare the AppImage and checksum
+        run: |
+          test -s release-assets/FreeFlow-1.0.0.AppImage
+          cd release-assets
+          sha256sum FreeFlow-1.0.0.AppImage > FreeFlow-1.0.0.AppImage.sha256
+      - name: Publish the Linux prerelease
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          Première préversion Linux x86_64 du fork FreeFlow.
+
+          - AppImage autonome avec moteur de transcription local inclus.
+          - Collage automatique sous X11 avec xdotool ; collage manuel sous Wayland.
+          - Build validé sur Ubuntu : 11 tests, moteur CPU et démarrage de l’interface sous X11 virtuel.
+          - Le micro réel et l’accélération GPU restent à valider sur le poste.
+
+          Télécharge FreeFlow-1.0.0.AppImage, rends le fichier exécutable avec chmod +x, puis lance-le.
+          Le modèle vocal est téléchargé au premier lancement.
+
+          [Guide Linux](https://github.com/iodamien/freeflow/blob/linux-support/docs/LINUX.md)
+          [Build et vérifications](https://github.com/iodamien/freeflow/actions/runs/40104606107)
+          EOF
+          gh release create "$RELEASE_TAG" \
+            release-assets/FreeFlow-1.0.0.AppImage \
+            release-assets/FreeFlow-1.0.0.AppImage.sha256 \
+            --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" \
+            --title "FreeFlow 1.0.0 Linux — expérimental" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" --draft --prerelease
+          count=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[] | select(.name == "FreeFlow-1.0.0.AppImage" and .size > 0)] | length')
+          test "$count" = 1
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
