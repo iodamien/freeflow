@@ -7,10 +7,10 @@
   "author": "Alan",
   "license": "MIT",
   "private": true,
-  "homepage": "https://github.com/AlanECE/freeflow",
+  "homepage": "https://github.com/iodamien/freeflow",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AlanECE/freeflow.git"
+    "url": "https://github.com/iodamien/freeflow.git"
   },
   "scripts": {
     "start": "electron .",
@@ -19,7 +19,12 @@
     "package": "npx @electron/packager . FreeFlow --platform=win32 --arch=x64 --overwrite --icon=assets/icon.ico --extra-resource=stt/dist/freeflow-stt --extra-resource=native/PasteHelper.exe --out=dist --ignore=\"^/stt($|/)\" --ignore=\"^/native/PasteHelper\\.cs$\" --ignore=\"^/screenshots($|/)\" --ignore=\"^/dist($|/)\" --ignore=\"^/release($|/)\" --ignore=\"^/installer($|/)\" --ignore=\"^/docs($|/)\" --ignore=\"^/\\.git($|/)\" --ignore=\"^/\\.gitignore$\" --ignore=\"^/assets/make_icon\\.py$\" --ignore=\"^/README\\.md$\"",
     "package:release": "npx @electron/packager . FreeFlow --platform=win32 --arch=x64 --overwrite --icon=assets/icon.ico --extra-resource=stt/dist/freeflow-stt --extra-resource=native/PasteHelper.exe --out=release --ignore=\"^/stt($|/)\" --ignore=\"^/native/PasteHelper\\.cs$\" --ignore=\"^/screenshots($|/)\" --ignore=\"^/dist($|/)\" --ignore=\"^/release($|/)\" --ignore=\"^/installer($|/)\" --ignore=\"^/docs($|/)\" --ignore=\"^/\\.git($|/)\" --ignore=\"^/\\.gitignore$\" --ignore=\"^/assets/make_icon\\.py$\" --ignore=\"^/README\\.md$\"",
     "installer": "electron-builder --win nsis --x64 --prepackaged release/FreeFlow-win32-x64 --publish never",
-    "release": "npm run package:release && npm run installer"
+    "release": "npm run package:release && npm run installer",
+    "start:linux": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "build:stt:linux": "python3 stt/build_stt.py --no-cuda",
+    "package:linux": "electron-builder --linux tar.gz --x64 --config electron-builder.linux.json --publish never",
+    "release:linux": "electron-builder --linux AppImage tar.gz --x64 --config electron-builder.linux.json --publish never",
+    "test": "node --test test/*.test.js"
   },
   "build": {
     "appId": "com.alan.freeflow",
@@ -74,5 +79,6 @@
   },
   "dependencies": {
     "uiohook-napi": "^1.5.5"
-  }
+  },
+  "desktopName": "com.alan.freeflow.desktop"
 }
