@@ -11,11 +11,13 @@ const { formatText, countWords } = require('./lib/format');
 const { pcm16ToWav, wavDurationMs } = require('./lib/wav');
 const { Sidecar } = require('./lib/sidecar');
 const { paste } = require('./lib/paste');
+const { isWayland, modelCachePath, setLaunchAtLogin } = require('./lib/platform');
 const { DEFAULT_VOCAB, normalizeVocab, parseSounds } = require('./lib/vocab');
 const { execFile } = require('child_process');
 
 app.setName('FreeFlow');
-app.setAppUserModelId('com.alan.freeflow');
+if (process.platform === 'win32') app.setAppUserModelId('com.alan.freeflow');
+if (process.platform === 'linux') app.setDesktopName('com.alan.freeflow.desktop');
 
 const ROOT = __dirname;
 const ASSETS = path.join(ROOT, 'assets');
@@ -23,7 +25,7 @@ const DEFAULT_SETTINGS = {
   shortcut: 'Ctrl+Alt+Space',
   mode: 'toggle',               // 'toggle' | 'ptt'
   language: 'auto',             // 'auto' | 'fr' | 'en'
-  autoPaste: true,
+  autoPaste: !isWayland(),
   launchAtLogin: false,
   microphoneId: 'default',
   pasteDelayMs: 60,
@@ -76,7 +78,7 @@ function initStores() {
   settings = createStore(path.join(userData, 'settings.json'), DEFAULT_SETTINGS);
   if (!fs.existsSync(settings.path)) settings.set(settings.get()); // write defaults so the file is discoverable
   // Models (0,5 to 3 GB) go to %LOCALAPPDATA%\FreeFlow\models, never to the roaming profile.
-  if (!settings.get().modelCache) settings.update({ modelCache: path.join(process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'FreeFlow') : userData, 'models') });
+  if (!settings.get().modelCache) settings.update({ modelCache: modelCachePath(userData) });
   dictionary = createStore(path.join(userData, 'dictionary.json'), []);
   // Vocabulary entries are { word, sounds[] }; migrate legacy string lists and seed the defaults once.
   let vocab = normalizeVocab(dictionary.get());
@@ -113,6 +115,7 @@ function buildState() {
   const hist = history.get();
   return {
     version: app.getVersion(),
+    platform: { name: process.platform, wayland: isWayland(), autoPasteAvailable: process.platform === 'win32' || (process.platform === 'linux' && !isWayland() && !!process.env.DISPLAY) },
     // First name only ("Bonjour, Alan"); --display-name=<x> overrides it for screenshots.
     user: typeof argv['display-name'] === 'string' ? argv['display-name'] : String(os.userInfo().username || '').split(/[\s._-]+/)[0],
     settings: settings.get(),
@@ -137,6 +140,7 @@ function pushState() {
 
 // ---- Paths -----------------------------------------------------------------
 function pasteHelperPath() {
+  if (process.platform === 'linux') return 'xdotool';
   const candidates = [
     path.join(process.resourcesPath || '', 'PasteHelper.exe'),
     path.join(ROOT, 'native', 'PasteHelper.exe'),
@@ -150,14 +154,14 @@ function createHub() {
     width: 1100, height: 720, minWidth: 900, minHeight: 600,
     title: 'FreeFlow',
     backgroundColor: '#fcfcfb',
-    icon: path.join(ASSETS, 'icon.ico'),
+    icon: path.join(ASSETS, process.platform === 'linux' ? 'icon.png' : 'icon.ico'),
     autoHideMenuBar: true,
     show: false,
     webPreferences: { preload: path.join(ROOT, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   hub.loadFile(path.join(ROOT, 'renderer', 'hub', 'index.html'));
   hub.on('page-title-updated', (e) => e.preventDefault());
-  hub.on('close', (e) => { if (!quitting) { e.preventDefault(); hub.hide(); } });
+  hub.on('close', (e) => { if (!quitting) { e.preventDefault(); if (tray) hub.hide(); else quitApp(); } });
   hub.on('hide', () => { if (shortcutSuspended) { shortcutSuspended = false; registerShortcut(); pushState(); } });
   hub.webContents.on('did-finish-load', pushState);
   hub.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
@@ -460,6 +464,7 @@ function foreignKeyHeld() {
 }
 
 function maskWinKey() {
+  if (process.platform !== 'win32') return;
   execFile(pasteHelperPath(), ['--mask'], { windowsHide: true, timeout: 3000 }, () => {});
 }
 
@@ -543,11 +548,10 @@ ipcMain.handle('ff:get-state', () => buildState());
 
 ipcMain.handle('ff:set-settings', (_e, patch) => {
   const before = settings.get();
+  const requested = { ...before, ...(patch || {}) };
+  if (requested.launchAtLogin !== before.launchAtLogin) setLaunchAtLogin(app, ROOT, requested.launchAtLogin);
   const next = settings.update(patch || {});
   if (next.shortcut !== before.shortcut || next.mode !== before.mode) registerShortcut();
-  if (next.launchAtLogin !== before.launchAtLogin) {
-    try { app.setLoginItemSettings({ openAtLogin: !!next.launchAtLogin, path: process.execPath, args: app.isPackaged ? [] : [ROOT] }); } catch (e) { log('login item:', e.message); }
-  }
   updateTray();
   const state = buildState();
   pushState();
@@ -789,7 +793,14 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'audioCapture'));
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media' || permission === 'audioCapture');
 
-  try { uiohookMod = require('uiohook-napi'); pttAvailable = !!(uiohookMod && uiohookMod.uIOhook); } catch (e) { pttAvailable = false; log('uiohook-napi unavailable:', e.message); }
+  // libuiohook only supports X11 on Linux; do not start it on Wayland.
+  if (process.platform !== 'linux' || (!isWayland() && process.env.DISPLAY)) {
+    try { uiohookMod = require('uiohook-napi'); pttAvailable = !!(uiohookMod && uiohookMod.uIOhook); } catch (e) { pttAvailable = false; log('uiohook-napi unavailable:', e.message); }
+  }
+  if (!pttAvailable && settings.get().mode === 'ptt') settings.update({ mode: 'toggle' });
+  if (process.platform === 'linux' && settings.get().launchAtLogin) {
+    try { setLaunchAtLogin(app, ROOT, true); } catch (e) { log('autostart:', e.message); }
+  }
 
   const s = settings.get();
   sidecar = new Sidecar({ port: s.sidecarPort, hfHome: s.modelCache, log, appPath: ROOT, resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
@@ -798,12 +809,12 @@ app.whenReady().then(async () => {
   sidecar.on('exit', () => { updateTray(); pushState(); });
   sidecar.on('progress', () => { updateTray(); pushState(); });
 
-  createTray();
+  try { createTray(); } catch (e) { log('tray unavailable:', e.message); tray = null; }
   createOverlay();
   createHub();
   registerShortcut();
   screen.on('display-metrics-changed', positionOverlay);
-  if (s.showHubAtStart || DEV_MODE) showHub();
+  if (s.showHubAtStart || !tray || DEV_MODE) showHub();
   if (process.env.FREEFLOW_NO_SIDECAR) {
     // UI-only development: skip the engine entirely.
     sidecar.info = { ...sidecar.info, loading: false, error: 'Moteur désactivé (FREEFLOW_NO_SIDECAR)' };
