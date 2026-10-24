@@ -1,0 +1,42 @@
+{
+  "appId": "com.alan.freeflow",
+  "productName": "FreeFlow",
+  "directories": {
+    "output": "release/linux",
+    "buildResources": "assets"
+  },
+  "files": [
+    "main.js",
+    "preload.js",
+    "lib/**/*",
+    "renderer/**/*",
+    "assets/**/*",
+    "package.json"
+  ],
+  "asarUnpack": [
+    "node_modules/uiohook-napi/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "stt/dist/freeflow-stt",
+      "to": "freeflow-stt",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
+  "linux": {
+    "target": [
+      "tar.gz"
+    ],
+    "icon": "assets/icon.png",
+    "category": "Utility",
+    "executableName": "freeflow",
+    "desktop": {
+      "entry": {
+        "Name": "FreeFlow",
+        "StartupWMClass": "FreeFlow"
+      }
+    }
+  }
+}
