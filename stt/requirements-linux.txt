@@ -1,0 +1,3 @@
+faster-whisper>=1.1,<2
+ctranslate2>=4.5,<5
+pyinstaller>=6,<7
