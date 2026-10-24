@@ -1,0 +1,81 @@
+name: Linux port
+
+on:
+  push:
+    branches: [linux-support]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Linux and Windows behavior checks
+        run: npm test
+      - name: JavaScript and Python syntax
+        run: |
+          for file in main.js preload.js lib/*.js renderer/hub/*.js renderer/overlay/*.js; do
+            node --check "$file"
+          done
+          python3 -m py_compile stt/build_stt.py stt/stt_server.py test/stt_smoke.py
+
+  build-and-smoke:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: stt/requirements-linux.txt
+      - name: Linux desktop and native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool libxtst-dev libxinerama-dev libxrandr-dev libxi-dev libxkbcommon-dev libgtk-3-0 libnss3 libasound2 libgbm1 libx11-xcb1
+      - run: npm ci
+      - run: python3 -m pip install -r stt/requirements-linux.txt
+      - name: Freeze the CPU speech engine
+        run: npm run build:stt:linux
+      - name: Exercise the frozen speech engine
+        run: python3 test/stt_smoke.py stt/dist/freeflow-stt/freeflow-stt
+      - name: Build Linux archive and AppImage
+        run: npm run release:linux
+      - name: Launch the packaged Electron application under X11
+        shell: bash
+        run: |
+          env -u ELECTRON_RUN_AS_NODE FREEFLOW_NO_SIDECAR=1 timeout 75s xvfb-run -a release/linux/linux-unpacked/freeflow --screenshots=/tmp/freeflow-linux-ui --exit 2>&1 | tee /tmp/freeflow-linux-ui.log
+          python3 - <<'PY'
+          from pathlib import Path
+          log = Path('/tmp/freeflow-linux-ui.log').read_text()
+          assert 'DEV_ERROR' not in log, log
+          images = list(Path('/tmp/freeflow-linux-ui').glob('*.png'))
+          assert len(images) == 9, [str(p) for p in images]
+          print('Packaged Linux application started and rendered all nine views')
+          PY
+      - name: Keep UI screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: freeflow-linux-ui
+          path: |
+            /tmp/freeflow-linux-ui
+            /tmp/freeflow-linux-ui.log
+      - name: Keep Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: freeflow-linux-x64
+          path: |
+            release/linux/*.tar.gz
+            release/linux/*.AppImage
+          if-no-files-found: error
