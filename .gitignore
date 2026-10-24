@@ -15,3 +15,5 @@ native/*.exe
 .env
 .env.*
 *.local.json
+.venv/
+native/PasteHelperMac

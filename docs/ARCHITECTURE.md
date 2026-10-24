@@ -45,7 +45,8 @@ freeflow/
 │   ├── sidecar.js            lance / adopte / arrête le moteur, /health (progression), /transcribe
 │   ├── format.js             mise en forme (fillers, snippets, vocabulaire, typographie, majuscules)
 │   ├── vocab.js              vocabulaire : variantes entendues → mot correct (accents, chiffres, séparateurs ignorés)
-│   ├── paste.js              PasteHelper.exe + réglages par application
+│   ├── paste.js              PasteHelper.exe (Windows), xdotool (Linux X11), PasteHelperMac (macOS) + réglages par application
+│   ├── platform.js           chemins, raccourci par défaut et démarrage automatique selon le système
 │   ├── wav.js                PCM16 → WAV
 │   └── store.js              fichiers JSON écrits de façon atomique
 ├── renderer/
@@ -55,7 +56,8 @@ freeflow/
 │   ├── stt_server.py         moteur faster-whisper (serveur HTTP de la bibliothèque standard)
 │   └── build_stt.py          PyInstaller onedir + copie des DLL cuBLAS 12 / cuDNN 9
 ├── native/
-│   └── PasteHelper.cs        collage simulé (SendInput), --dry-run, --info, --mask
+│   ├── PasteHelper.cs        collage simulé (SendInput), --dry-run, --info, --mask
+│   └── PasteHelperMac.swift  macOS : Cmd+V simulé (CGEvent), --dry-run, --info ; voir docs/MACOS.md
 ├── installer/installer.nsh   règles de l'installateur (fermer FreeFlow avant mise à jour, nettoyage)
 ├── assets/                   icônes (make_icon.py) et police Figtree
 └── docs/                     cette page et les captures du README

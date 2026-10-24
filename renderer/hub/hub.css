@@ -152,6 +152,8 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .field > label { font-weight: 600; font-size: 13px; }
 .row { display: flex; align-items: center; }
 .row.gap { gap: 12px; flex-wrap: wrap; }
+.mac-perms { margin: 10px 0 6px; }
+.mac-perms[hidden] { display: none; }
 .shortcut-rec { background: var(--cream); border: 1px solid var(--grey-2); border-bottom-width: 3px; border-radius: 10px; padding: 8px 16px; font-weight: 700; cursor: pointer; min-width: 170px; }
 .shortcut-rec.recording { background: var(--lavender); border-color: var(--purple); animation: blink 1s infinite; }
 .shortcut-rec.bad { border-color: var(--red); }

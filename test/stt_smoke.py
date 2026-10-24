@@ -1,4 +1,4 @@
-"""Exercise the frozen Linux STT server with a tiny CPU model and silent WAV.
+"""Exercise the frozen STT server (Linux or macOS) with a tiny CPU model and silent WAV.
 This is a build check, not a microphone or transcription-quality evaluation.
 """
 import io
@@ -59,7 +59,7 @@ def main():
                     assert json.load(response)["ok"]
                 child.wait(timeout=10)
                 assert child.returncode == 0, child.returncode
-                print("Frozen Linux STT: health, CPU model, WAV transcription and shutdown passed")
+                print("Frozen STT: health, CPU model, WAV transcription and shutdown passed")
             finally:
                 if child.poll() is None:
                     child.terminate()

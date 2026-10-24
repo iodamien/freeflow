@@ -2,7 +2,7 @@
   "name": "freeflow",
   "productName": "FreeFlow",
   "version": "1.0.0",
-  "description": "Dictée vocale 100 % locale pour Windows : tu parles, le texte s'écrit là où tu tapes.",
+  "description": "Dictée vocale 100 % locale : tu parles, le texte s'écrit là où tu tapes.",
   "main": "main.js",
   "author": "Alan",
   "license": "MIT",
@@ -24,6 +24,11 @@
     "build:stt:linux": "python3 stt/build_stt.py --no-cuda",
     "package:linux": "electron-builder --linux tar.gz --x64 --config electron-builder.linux.json --publish never",
     "release:linux": "electron-builder --linux AppImage tar.gz --x64 --config electron-builder.linux.json --publish never",
+    "start:mac": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "build:native:mac": "swiftc -O -target arm64-apple-macos12 -o native/PasteHelperMac native/PasteHelperMac.swift",
+    "build:stt:mac": "python3 stt/build_stt.py --no-cuda",
+    "package:mac": "electron-builder --mac dir --arm64 --config electron-builder.mac.json --publish never",
+    "release:mac": "electron-builder --mac dmg --arm64 --config electron-builder.mac.json --publish never",
     "test": "node --test test/*.test.js"
   },
   "build": {

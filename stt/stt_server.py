@@ -22,6 +22,7 @@ reports phase="downloading" and download={"model","done","total"} in bytes.
 import glob
 import io
 import json
+import multiprocessing
 import os
 import site
 import sys
@@ -30,6 +31,12 @@ import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+
+# macOS starts multiprocessing helpers (the resource tracker behind the download
+# progress locks) by re-running sys.executable, i.e. this frozen server. Let
+# those children do their job and exit before the heavy imports and the port bind.
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
 
 
 def _log(*args):

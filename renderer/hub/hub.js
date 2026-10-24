@@ -3,6 +3,7 @@
 (() => {
   const $ = (sel) => document.querySelector(sel);
   const ff = window.freeflow;
+  const IS_MAC = /Mac/.test(navigator.platform);
   let state = null;
   let phase = 'idle';
   let hubDictation = false;      // the current dictation targets the "try here" box
@@ -52,7 +53,7 @@
     const ptt = s.mode === 'ptt';
     $('#howto-mode').textContent = ptt ? 'et garde la touche enfoncée : la pastille apparaît en bas de l’écran et écoute.' : ': la pastille apparaît en bas de l’écran et écoute.';
     $('#howto-stop').textContent = ptt ? 'Relâche la touche' : 'Appuie à nouveau';
-    $('#howto-paste').textContent = s.autoPaste ? 'Collage automatique activé. Le presse-papiers est restauré juste après.' : 'Collage automatique désactivé : le texte est copié dans le presse-papiers, colle-le avec Ctrl+V.';
+    $('#howto-paste').textContent = s.autoPaste ? 'Collage automatique activé. Le presse-papiers est restauré juste après.' : `Collage automatique désactivé : le texte est copié dans le presse-papiers, colle-le avec ${IS_MAC ? 'Cmd+V' : 'Ctrl+V'}.`;
 
     // Engine pill
     const pill = $('#engine-pill');
@@ -104,13 +105,17 @@
     const pttInput = document.querySelector('input[name=mode][value=ptt]');
     pttInput.disabled = !state.pttAvailable;
     $('#mode-ptt-label').classList.toggle('disabled', !state.pttAvailable);
-    $('#ptt-hint').textContent = state.pttAvailable ? 'Garde la touche enfoncée pendant que tu parles ; un appui bref passe en mains libres.' : (state.platform && state.platform.wayland ? 'Indisponible sous Wayland. Utilise le mode mains libres.' : 'Indisponible : le module uiohook-napi n’a pas pu être chargé.');
+    $('#ptt-hint').textContent = state.pttAvailable ? 'Garde la touche enfoncée pendant que tu parles ; un appui bref passe en mains libres.' : (state.platform && state.platform.wayland ? 'Indisponible sous Wayland. Utilise le mode mains libres.' : IS_MAC ? 'Indisponible tant que FreeFlow n’est pas autorisé dans Accessibilité (voir Transcription).' : 'Indisponible : le module uiohook-napi n’a pas pu être chargé.');
     $('#set-language').value = s.language;
     $('#set-autopaste').checked = !!s.autoPaste;
     $('#set-autopaste').disabled = !!state.platform && !state.platform.autoPasteAvailable;
     $('#platform-hint').textContent = state.platform && state.platform.wayland
       ? 'Wayland : colle le texte avec Ctrl + V. Le mode maintenu et le collage automatique demandent une session X11. Le raccourci mains libres dépend du portail de ton bureau.'
-      : state.platform && state.platform.name === 'linux' ? 'Linux X11 : installe xdotool pour le collage automatique. Dans un terminal, utilise Ctrl + Maj + V pour coller manuellement.' : '';
+      : state.platform && state.platform.name === 'linux' ? 'Linux X11 : installe xdotool pour le collage automatique. Dans un terminal, utilise Ctrl + Maj + V pour coller manuellement.'
+      : IS_MAC ? macHint(state.platform) : '';
+    $('#mac-accessibility').hidden = !IS_MAC || !state.platform || state.platform.accessibility;
+    $('#mac-microphone').hidden = !IS_MAC || !state.platform || state.platform.microphone === 'granted';
+    $('#mac-perms').hidden = $('#mac-accessibility').hidden && $('#mac-microphone').hidden;
     $('#set-login').checked = !!s.launchAtLogin;
     $('#eng-state').textContent = eng.ready ? 'Prêt' : eng.loading ? (eng.phase === 'downloading' ? state.loadingLabel : 'Chargement…') : 'Erreur';
     $('#eng-device').textContent = eng.device ? (eng.device === 'cuda' ? 'GPU (CUDA)' : 'CPU') : '—';
@@ -124,6 +129,16 @@
     const micSel = $('#set-mic');
     if (micSel.querySelector(`option[value="${s.microphoneId}"]`)) micSel.value = s.microphoneId;
     renderTry();
+  }
+
+  function macHint(p) {
+    if (!p) return '';
+    const missing = [];
+    if (p.microphone !== 'granted') missing.push('Micro (pour écouter)');
+    if (!p.accessibility) missing.push('Accessibilité (pour coller le texte et pour le mode maintenu)');
+    return missing.length
+      ? `macOS : autorise FreeFlow dans Réglages Système → Confidentialité et sécurité → ${missing.join(', puis ')}. En attendant, le texte reste dans le presse-papiers (Cmd+V).`
+      : 'macOS : micro et Accessibilité autorisés.';
   }
 
   function renderTry() {
@@ -214,6 +229,8 @@
   $('#set-login').addEventListener('change', (e) => ff.invoke('ff:set-settings', { launchAtLogin: e.target.checked }));
   $('#open-logs').addEventListener('click', () => ff.invoke('ff:open-logs'));
   $('#open-data').addEventListener('click', () => ff.invoke('ff:open-path', state.paths.userData));
+  $('#mac-accessibility').addEventListener('click', () => ff.invoke('ff:mac-permission', 'accessibility'));
+  $('#mac-microphone').addEventListener('click', () => ff.invoke('ff:mac-permission', 'microphone'));
 
   // Shortcut recorder: "Enregistrer" starts listening (the active shortcut is
   // suspended so the keys reach this window), every new chord replaces the
@@ -230,7 +247,7 @@
   const MOD_ORDER = ['Ctrl', 'Alt', 'Shift', 'Super'];
   const MOD_CODES = { ControlLeft: 'Ctrl', ControlRight: 'Ctrl', AltLeft: 'Alt', AltRight: 'Alt', ShiftLeft: 'Shift', ShiftRight: 'Shift', MetaLeft: 'Super', MetaRight: 'Super', OSLeft: 'Super', OSRight: 'Super' };
   const MOD_FLAG = { Ctrl: 'ctrlKey', Alt: 'altKey', Shift: 'shiftKey', Super: 'metaKey' };
-  const KEY_LABEL = { Ctrl: 'Ctrl', Alt: 'Alt', Shift: 'Maj', Super: 'Win', Space: 'Espace', Enter: 'Entrée', Backspace: 'Retour', Delete: 'Suppr', Insert: 'Inser', Up: '↑', Down: '↓', Left: '←', Right: '→', Capslock: 'Verr. Maj' };
+  const KEY_LABEL = { Ctrl: 'Ctrl', Alt: IS_MAC ? 'Option' : 'Alt', Shift: 'Maj', Super: IS_MAC ? 'Cmd' : 'Win', Space: 'Espace', Enter: 'Entrée', Backspace: 'Retour', Delete: 'Suppr', Insert: 'Inser', Up: '↑', Down: '↓', Left: '←', Right: '→', Capslock: 'Verr. Maj' };
   const sc = { recording: false, held: new Set(), mods: new Set(), key: null, pending: null, error: null };
 
   function prettyAcc(acc) { return String(acc || '').split('+').filter(Boolean).map((k) => KEY_LABEL[k] || k).join(' + '); }
@@ -240,8 +257,8 @@
     const mods = parts.filter((p) => MOD_ORDER.includes(p));
     const key = parts.find((p) => !MOD_ORDER.includes(p));
     if (!parts.length) return 'Appuie sur au moins une combinaison.';
-    if (!key) return mods.length >= 2 ? null : 'Avec seulement des touches de modification, il en faut au moins deux (ex. Ctrl + Win).';
-    if (!mods.length && !/^F\d{1,2}$/.test(key)) return 'Ajoute Ctrl, Alt, Maj ou Win (ou utilise une touche F1 à F12).';
+    if (!key) return mods.length >= 2 ? null : `Avec seulement des touches de modification, il en faut au moins deux (ex. ${IS_MAC ? 'Ctrl + Option' : 'Ctrl + Win'}).`;
+    if (!mods.length && !/^F\d{1,2}$/.test(key)) return `Ajoute ${IS_MAC ? 'Ctrl, Option, Maj ou Cmd' : 'Ctrl, Alt, Maj ou Win'} (ou utilise une touche F1 à F12).`;
     return null;
   }
   function renderKeys(acc, cls, placeholder) {

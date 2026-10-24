@@ -1,0 +1,76 @@
+{
+  "appId": "com.alan.freeflow",
+  "productName": "FreeFlow",
+  "copyright": "© 2026 Alan — licence MIT",
+  "directories": {
+    "output": "release/mac",
+    "buildResources": "assets"
+  },
+  "files": [
+    "main.js",
+    "preload.js",
+    "lib/**/*",
+    "renderer/**/*",
+    "assets/**/*",
+    "!assets/make_icon.py",
+    "!assets/icon.ico",
+    "package.json"
+  ],
+  "asarUnpack": [
+    "node_modules/uiohook-napi/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "stt/dist/freeflow-stt",
+      "to": "freeflow-stt",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "native/PasteHelperMac",
+      "to": "PasteHelperMac"
+    }
+  ],
+  "mac": {
+    "target": [
+      {
+        "target": "dmg",
+        "arch": [
+          "arm64"
+        ]
+      }
+    ],
+    "icon": "assets/icon.icns",
+    "category": "public.app-category.productivity",
+    "minimumSystemVersion": "12.0",
+    "identity": "-",
+    "hardenedRuntime": false,
+    "gatekeeperAssess": false,
+    "darkModeSupport": false,
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "FreeFlow écoute le micro pendant une dictée. Le son est transcrit sur ton Mac et n'est jamais envoyé sur Internet.",
+      "LSMultipleInstancesProhibited": true
+    }
+  },
+  "dmg": {
+    "artifactName": "FreeFlow-${version}-arm64.dmg",
+    "title": "FreeFlow ${version}",
+    "window": {
+      "width": 540,
+      "height": 380
+    },
+    "contents": [
+      {
+        "x": 140,
+        "y": 190
+      },
+      {
+        "x": 400,
+        "y": 190,
+        "type": "link",
+        "path": "/Applications"
+      }
+    ]
+  }
+}

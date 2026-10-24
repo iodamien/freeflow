@@ -2,7 +2,7 @@
 
 <h1 align="center">FreeFlow</h1>
 
-> **Fork Linux expérimental** : les adaptations sont sur la branche `linux-support`. Voir le [guide Linux](docs/LINUX.md) pour l’installation, le build et les limites X11/Wayland. Les instructions Windows ci-dessous proviennent du projet original.
+> **Fork Linux et macOS expérimental** : le portage Linux est sur la branche `linux-support`, le portage macOS (Apple Silicon) sur `macos-support`. Voir le [guide Linux](docs/LINUX.md) et le [guide macOS](docs/MACOS.md) pour l’installation, le build et les limites. Les instructions Windows ci-dessous proviennent du projet original.
 
 
 <p align="center"><b>La dictée vocale 100 % locale pour Windows.</b><br>
@@ -79,7 +79,7 @@ Paramètres Windows → Applications → FreeFlow → Désinstaller. Le modèle 
 
 **Mon antivirus bloque l'installateur.** Il n'est pas signé (un certificat coûte plusieurs centaines d'euros par an). Le code source est entièrement dans ce dépôt et tu peux construire l'installateur toi-même (voir plus bas).
 
-**Est-ce que ça marche sur Mac ou Linux ?** Ce fork propose un portage Linux expérimental : collage et raccourcis sous X11, mode presse-papiers sous Wayland. Voir [docs/LINUX.md](docs/LINUX.md). macOS n’est pas pris en charge.
+**Est-ce que ça marche sur Mac ou Linux ?** Ce fork propose un portage Linux expérimental : collage et raccourcis sous X11, mode presse-papiers sous Wayland. Voir [docs/LINUX.md](docs/LINUX.md). Un DMG macOS pour Apple Silicon (M1 et suivants) est aussi proposé : voir [docs/MACOS.md](docs/MACOS.md).
 
 ## Construire depuis les sources
 

@@ -1,0 +1,86 @@
+name: macOS port
+
+on:
+  push:
+    branches: [macos-support]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: stt/requirements-macos.txt
+      - run: npm ci
+      - name: Behavior checks and syntax
+        run: |
+          npm test
+          for file in main.js preload.js lib/*.js renderer/hub/*.js renderer/overlay/*.js; do
+            node --check "$file"
+          done
+          python3 -m py_compile stt/build_stt.py stt/stt_server.py test/stt_smoke.py
+      - run: python3 -m pip install -r stt/requirements-macos.txt
+      - name: Build the Cmd+V helper
+        run: |
+          npm run build:native:mac
+          native/PasteHelperMac --dry-run
+      - name: Freeze the CPU speech engine
+        run: npm run build:stt:mac
+      - name: Exercise the frozen speech engine
+        run: python3 test/stt_smoke.py stt/dist/freeflow-stt/freeflow-stt
+      - name: Build the arm64 DMG
+        run: npm run release:mac
+      - name: Check the bundle and its ad-hoc signature
+        run: |
+          app=release/mac/mac-arm64/FreeFlow.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          test "$(lipo -archs "$app/Contents/MacOS/FreeFlow")" = arm64
+          test -x "$app/Contents/Resources/freeflow-stt/freeflow-stt"
+          test -x "$app/Contents/Resources/PasteHelperMac"
+          plutil -extract NSMicrophoneUsageDescription raw "$app/Contents/Info.plist"
+          hdiutil verify release/mac/FreeFlow-*-arm64.dmg
+          cd release/mac && shasum -a 256 FreeFlow-*-arm64.dmg > "$(ls FreeFlow-*-arm64.dmg).sha256"
+      - name: Launch the packaged application
+        run: |
+          (sleep 90; pkill -f 'FreeFlow.app/Contents/MacOS/FreeFlow') & watchdog=$!
+          FREEFLOW_NO_SIDECAR=1 release/mac/mac-arm64/FreeFlow.app/Contents/MacOS/FreeFlow --user-data-dir="$RUNNER_TEMP/ff-profile" --screenshots="$RUNNER_TEMP/freeflow-macos-ui" --exit > "$RUNNER_TEMP/freeflow-macos-ui.log" 2>&1 || true
+          kill "$watchdog" 2>/dev/null || true
+          cat "$RUNNER_TEMP/freeflow-macos-ui.log"
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import sys
+          from pathlib import Path
+          tmp = Path(sys.argv[1])
+          log = (tmp / 'freeflow-macos-ui.log').read_text()
+          assert 'DEV_ERROR' not in log, log
+          images = list((tmp / 'freeflow-macos-ui').glob('*.png'))
+          assert len(images) == 9, [str(p) for p in images]
+          print('Packaged macOS application started and rendered all nine views')
+          PY
+      - name: Keep UI screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: freeflow-macos-ui
+          path: |
+            ${{ runner.temp }}/freeflow-macos-ui
+            ${{ runner.temp }}/freeflow-macos-ui.log
+      - name: Keep the DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: freeflow-macos-arm64
+          path: |
+            release/mac/*.dmg
+            release/mac/*.dmg.sha256
+          if-no-files-found: error

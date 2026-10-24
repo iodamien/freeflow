@@ -1,22 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-
-function load(file, { platform = 'linux', env = {}, mocks = {} } = {}) {
-  const module = { exports: {} };
-  const context = {
-    module,
-    require: (name) => Object.hasOwn(mocks, name) ? mocks[name] : require(name),
-    process: { platform, env, execPath: '/opt/Free Flow/electron' },
-    setTimeout, clearTimeout, setInterval: () => 1, clearInterval: () => {},
-    URLSearchParams, AbortController, fetch,
-  };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context, { filename: file });
-  return module.exports;
-}
+const { load } = require('./helpers');
 
 function pasteFixture({ wayland = false, app = 'firefox', changed = false, missing = false } = {}) {
   const calls = [];

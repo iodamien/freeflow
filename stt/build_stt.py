@@ -42,7 +42,8 @@ def find_in_site(rel_glob):
 
 def main():
     # Linux builds use CPU by default; system CUDA libraries can enable GPU at runtime.
-    # The Windows redistributable DLLs must never be copied into Linux builds.
+    # macOS (Apple Silicon) has no CUDA: CTranslate2 runs on the CPU there.
+    # The Windows redistributable DLLs must never be copied into these builds.
     no_cuda = "--no-cuda" in sys.argv or sys.platform != "win32"
     t0 = time.time()
     cmd = [

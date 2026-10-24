@@ -1,0 +1,5 @@
+faster-whisper>=1.1,<2
+ctranslate2>=4.5,<5
+# PyAV 16+ dropped the metadata_errors argument faster-whisper 1.2 still passes.
+av>=14,<16
+pyinstaller>=6,<7

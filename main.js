@@ -2,7 +2,7 @@
 // FreeFlow main process: tray, global shortcut, overlay pill, hub window,
 // dictation pipeline (overlay mic -> WAV -> local STT sidecar -> formatting ->
 // clipboard + simulated paste -> history).
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, clipboard, screen, nativeImage, shell, session } = require('electron');
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, clipboard, screen, nativeImage, shell, session, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -11,7 +11,7 @@ const { formatText, countWords } = require('./lib/format');
 const { pcm16ToWav, wavDurationMs } = require('./lib/wav');
 const { Sidecar } = require('./lib/sidecar');
 const { paste } = require('./lib/paste');
-const { isWayland, modelCachePath, setLaunchAtLogin } = require('./lib/platform');
+const { isWayland, defaultShortcut, autoPasteAvailable, modelCachePath, setLaunchAtLogin } = require('./lib/platform');
 const { DEFAULT_VOCAB, normalizeVocab, parseSounds } = require('./lib/vocab');
 const { execFile } = require('child_process');
 
@@ -19,10 +19,11 @@ app.setName('FreeFlow');
 if (process.platform === 'win32') app.setAppUserModelId('com.alan.freeflow');
 if (process.platform === 'linux') app.setDesktopName('com.alan.freeflow.desktop');
 
+const IS_MAC = process.platform === 'darwin';
 const ROOT = __dirname;
 const ASSETS = path.join(ROOT, 'assets');
 const DEFAULT_SETTINGS = {
-  shortcut: 'Ctrl+Alt+Space',
+  shortcut: defaultShortcut(),   // Ctrl+Alt+Space (Ctrl+Shift+Space on macOS)
   mode: 'toggle',               // 'toggle' | 'ptt'
   language: 'auto',             // 'auto' | 'fr' | 'en'
   autoPaste: !isWayland(),
@@ -61,6 +62,8 @@ let quitting = false;
 let shortcutOk = false;
 let pttAvailable = false;
 let uiohookMod = null;
+let macTrusted = false;        // macOS Accessibility permission (keyboard hook + simulated paste)
+let macPromptedAx = false;
 const dictation = { phase: 'idle', startedAt: 0, stoppedAt: 0, toHub: false, noPaste: false, timer: null, idleTimer: null };
 
 function log(...parts) {
@@ -115,7 +118,7 @@ function buildState() {
   const hist = history.get();
   return {
     version: app.getVersion(),
-    platform: { name: process.platform, wayland: isWayland(), autoPasteAvailable: process.platform === 'win32' || (process.platform === 'linux' && !isWayland() && !!process.env.DISPLAY) },
+    platform: { name: process.platform, wayland: isWayland(), autoPasteAvailable: autoPasteAvailable(), accessibility: IS_MAC ? macTrusted : true, microphone: IS_MAC ? systemPreferences.getMediaAccessStatus('microphone') : 'granted' },
     // First name only ("Bonjour, Alan"); --display-name=<x> overrides it for screenshots.
     user: typeof argv['display-name'] === 'string' ? argv['display-name'] : String(os.userInfo().username || '').split(/[\s._-]+/)[0],
     settings: settings.get(),
@@ -141,6 +144,10 @@ function pushState() {
 // ---- Paths -----------------------------------------------------------------
 function pasteHelperPath() {
   if (process.platform === 'linux') return 'xdotool';
+  if (IS_MAC) {
+    const mac = [path.join(process.resourcesPath || '', 'PasteHelperMac'), path.join(ROOT, 'native', 'PasteHelperMac')];
+    return mac.find((p) => p && fs.existsSync(p)) || mac[1];
+  }
   const candidates = [
     path.join(process.resourcesPath || '', 'PasteHelper.exe'),
     path.join(ROOT, 'native', 'PasteHelper.exe'),
@@ -154,7 +161,7 @@ function createHub() {
     width: 1100, height: 720, minWidth: 900, minHeight: 600,
     title: 'FreeFlow',
     backgroundColor: '#fcfcfb',
-    icon: path.join(ASSETS, process.platform === 'linux' ? 'icon.png' : 'icon.ico'),
+    icon: path.join(ASSETS, process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     autoHideMenuBar: true,
     show: false,
     webPreferences: { preload: path.join(ROOT, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
@@ -163,6 +170,8 @@ function createHub() {
   hub.on('page-title-updated', (e) => e.preventDefault());
   hub.on('close', (e) => { if (!quitting) { e.preventDefault(); if (tray) hub.hide(); else quitApp(); } });
   hub.on('hide', () => { if (shortcutSuspended) { shortcutSuspended = false; registerShortcut(); pushState(); } });
+  // macOS: permissions are granted in System Settings, re-check when the user comes back.
+  hub.on('focus', refreshMacPermissions);
   hub.webContents.on('did-finish-load', pushState);
   hub.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
 }
@@ -180,11 +189,14 @@ function createOverlay() {
     frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false,
     alwaysOnTop: true, skipTaskbar: true, focusable: false, resizable: false, movable: false,
     minimizable: false, maximizable: false, fullscreenable: false,
+    // macOS: a non-activating panel floats over full-screen apps without taking the focus.
+    ...(IS_MAC ? { type: 'panel' } : {}),
     webPreferences: { preload: path.join(ROOT, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
   });
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlay.setIgnoreMouseEvents(true, { forward: true });
-  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // skipTransformProcessType: otherwise macOS turns FreeFlow into an agent app and drops its Dock icon.
+  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   overlay.loadFile(path.join(ROOT, 'renderer', 'overlay', 'index.html'));
   positionOverlay();
 }
@@ -211,6 +223,8 @@ function showOverlay() {
 
 // ---- Tray ------------------------------------------------------------------
 function trayIcon(name) {
+  // macOS menu bar: monochrome "Template" images (+ @2x) that follow the light / dark bar.
+  if (IS_MAC) name = name.replace(/\.png$/, 'Template.png');
   return nativeImage.createFromPath(path.join(ASSETS, name));
 }
 
@@ -223,7 +237,7 @@ function createTray() {
 }
 
 function prettyShortcut(acc) {
-  const names = { Super: 'Win', Space: 'Espace', Ctrl: 'Ctrl', Alt: 'Alt', Shift: 'Maj' };
+  const names = IS_MAC ? { Super: 'Cmd', Space: 'Espace', Ctrl: 'Ctrl', Alt: 'Option', Shift: 'Maj' } : { Super: 'Win', Space: 'Espace', Ctrl: 'Ctrl', Alt: 'Alt', Shift: 'Maj' };
   return String(acc || '').split('+').map((k) => names[k] || k).join(' + ');
 }
 
@@ -338,6 +352,7 @@ ipcMain.on('ff:audio-done', (_e, payload) => {
 
 ipcMain.on('ff:audio-error', (_e, message) => {
   log('audio error:', message);
+  if (IS_MAC && systemPreferences.getMediaAccessStatus('microphone') !== 'granted') message = 'Micro refusé : Réglages Système → Confidentialité → Micro';
   setPhase('error', { message: message || 'Micro indisponible' });
   scheduleIdle(2000);
 });
@@ -392,7 +407,12 @@ async function runPipeline(wav, opts = {}) {
     log(`dictation: ${entry.words} words, stt ${entry.sttMs} ms, latency ${latencyMs} ms, paste=${entry.pasted}`);
     setPhase('done', { text, latencyMs, pasted: entry.pasted });
     scheduleIdle(pasteOutcome && pasteOutcome.outcome === 'blocked' ? 2200 : 900);
-    if (pasteOutcome && pasteOutcome.outcome === 'blocked') setPhase('error', { message: 'Collage bloqué — texte copié dans le presse-papiers' });
+    if (pasteOutcome && pasteOutcome.outcome === 'blocked') {
+      const axMissing = IS_MAC && !systemPreferences.isTrustedAccessibilityClient(false);
+      setPhase('error', { message: axMissing ? 'Autorise FreeFlow dans Accessibilité — texte copié' : 'Collage bloqué — texte copié dans le presse-papiers' });
+      // Ask once per session: macOS shows its dialog and adds FreeFlow (unchecked) to the list.
+      if (axMissing && !macPromptedAx) { macPromptedAx = true; systemPreferences.isTrustedAccessibilityClient(true); }
+    }
     pushState();
     return entry;
   } catch (err) {
@@ -562,11 +582,11 @@ ipcMain.handle('ff:shortcut-test', (_e, acc) => {
   const c = parseAccelerator(acc);
   const nMods = [c.ctrl, c.alt, c.shift, c.meta].filter(Boolean).length;
   if (!c.key) {
-    if (!pttAvailable) return { ok: false, error: 'Les raccourcis sans touche normale demandent le module uiohook-napi.' };
-    if (nMods < 2) return { ok: false, error: 'Avec seulement des touches de modification, il en faut au moins deux (ex. Ctrl + Win).' };
+    if (!pttAvailable) return { ok: false, error: IS_MAC ? 'Les raccourcis sans touche normale demandent l’autorisation Accessibilité.' : 'Les raccourcis sans touche normale demandent le module uiohook-napi.' };
+    if (nMods < 2) return { ok: false, error: `Avec seulement des touches de modification, il en faut au moins deux (ex. ${IS_MAC ? 'Ctrl + Option' : 'Ctrl + Win'}).` };
     return { ok: true };
   }
-  if (!nMods && !/^F\d{1,2}$/i.test(c.key)) return { ok: false, error: 'Ajoute au moins une touche de modification (Ctrl, Alt, Maj, Win), ou utilise une touche F1 à F12.' };
+  if (!nMods && !/^F\d{1,2}$/i.test(c.key)) return { ok: false, error: `Ajoute au moins une touche de modification (${IS_MAC ? 'Ctrl, Option, Maj, Cmd' : 'Ctrl, Alt, Maj, Win'}), ou utilise une touche F1 à F12.` };
   if (settings.get().mode === 'ptt' && pttAvailable) {
     return uiohookKeycode(c.key) != null ? { ok: true } : { ok: false, error: `La touche « ${c.key} » n’est pas reconnue en mode maintenu.` };
   }
@@ -638,6 +658,21 @@ ipcMain.handle('ff:dictation-cancel', () => { cancelDictation(); return dictatio
 ipcMain.handle('ff:copy', async (_e, text) => { await clipboard.writeText(String(text || '')); return true; });
 ipcMain.handle('ff:open-logs', () => shell.openPath(logDir));
 ipcMain.handle('ff:open-path', (_e, p) => shell.openPath(p));
+// macOS: show the system prompt (Accessibility adds FreeFlow to the list) and open the matching pane.
+ipcMain.handle('ff:mac-permission', async (_e, which) => {
+  if (!IS_MAC) return buildState();
+  if (which === 'microphone' && systemPreferences.getMediaAccessStatus('microphone') === 'not-determined') {
+    await systemPreferences.askForMediaAccess('microphone');
+  } else if (which === 'accessibility' && !systemPreferences.isTrustedAccessibilityClient(true)) {
+    macPromptedAx = true;
+  }
+  const pane = which === 'microphone' ? 'Privacy_Microphone' : 'Privacy_Accessibility';
+  if (which !== 'microphone' || systemPreferences.getMediaAccessStatus('microphone') === 'denied') {
+    await shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
+  }
+  refreshMacPermissions();
+  return buildState();
+});
 
 // Dev / verification commands: run the pipeline on a WAV file with paste forced off.
 ipcMain.handle('ff:test-pipeline', async (_e, wavPath) => testPipeline(wavPath));
@@ -769,6 +804,45 @@ async function runDevCommands() {
   if (argv.exit) setTimeout(quitApp, 300);
 }
 
+// ---- macOS -----------------------------------------------------------------
+function refreshMacPermissions() {
+  if (!IS_MAC) return;
+  const trusted = systemPreferences.isTrustedAccessibilityClient(false);
+  if (trusted !== macTrusted) {
+    macTrusted = trusted;
+    log('macOS accessibility:', trusted);
+    if (uiohookMod) {
+      pttAvailable = trusted;
+      if (!trusted && settings.get().mode === 'ptt') settings.update({ mode: 'toggle' });
+      registerShortcut();
+    }
+  }
+  pushState();
+}
+
+// French application menu; the Edit roles keep Cmd+C / Cmd+V working in the hub fields.
+function macMenu() {
+  return Menu.buildFromTemplate([
+    { label: 'FreeFlow', submenu: [
+      { role: 'about', label: 'À propos de FreeFlow' },
+      { type: 'separator' },
+      { label: 'Paramètres…', accelerator: 'Cmd+,', click: () => { showHub(); hub.webContents.send('ff:navigate', 'settings'); } },
+      { type: 'separator' },
+      { role: 'hide', label: 'Masquer FreeFlow' },
+      { role: 'hideOthers', label: 'Masquer les autres' },
+      { role: 'unhide', label: 'Tout afficher' },
+      { type: 'separator' },
+      { label: 'Quitter FreeFlow', accelerator: 'Cmd+Q', click: quitApp },
+    ] },
+    { label: 'Édition', submenu: [
+      { role: 'undo', label: 'Annuler' }, { role: 'redo', label: 'Rétablir' }, { type: 'separator' },
+      { role: 'cut', label: 'Couper' }, { role: 'copy', label: 'Copier' }, { role: 'paste', label: 'Coller' },
+      { role: 'selectAll', label: 'Tout sélectionner' },
+    ] },
+    { label: 'Fenêtre', submenu: [{ role: 'minimize', label: 'Réduire' }, { role: 'close', label: 'Fermer la fenêtre' }] },
+  ]);
+}
+
 // ---- Lifecycle ---------------------------------------------------------------
 async function quitApp() {
   if (quitting) return;
@@ -782,6 +856,7 @@ async function quitApp() {
 }
 
 app.on('second-instance', () => showHub());
+app.on('activate', () => showHub());       // macOS: click on the Dock icon
 app.on('window-all-closed', () => { /* keep running in the tray */ });
 app.on('before-quit', (e) => { if (!quitting) { e.preventDefault(); quitApp(); } });
 
@@ -796,6 +871,17 @@ app.whenReady().then(async () => {
   // libuiohook only supports X11 on Linux; do not start it on Wayland.
   if (process.platform !== 'linux' || (!isWayland() && process.env.DISPLAY)) {
     try { uiohookMod = require('uiohook-napi'); pttAvailable = !!(uiohookMod && uiohookMod.uIOhook); } catch (e) { pttAvailable = false; log('uiohook-napi unavailable:', e.message); }
+  }
+  if (IS_MAC) {
+    // The keyboard hook needs the Accessibility permission; starting it without makes
+    // libuiohook pop the system dialog on every attempt, so wait until it is granted.
+    macTrusted = systemPreferences.isTrustedAccessibilityClient(false);
+    pttAvailable = pttAvailable && macTrusted;
+    log(`macOS permissions: accessibility=${macTrusted} microphone=${systemPreferences.getMediaAccessStatus('microphone')}`);
+    Menu.setApplicationMenu(macMenu());
+    if (systemPreferences.getMediaAccessStatus('microphone') === 'not-determined' && !DEV_MODE) {
+      systemPreferences.askForMediaAccess('microphone').then((ok) => { log('microphone access:', ok); pushState(); });
+    }
   }
   if (!pttAvailable && settings.get().mode === 'ptt') settings.update({ mode: 'toggle' });
   if (process.platform === 'linux' && settings.get().launchAtLogin) {
